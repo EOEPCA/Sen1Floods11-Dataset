@@ -1,0 +1,5 @@
+[core]
+    remote = workspace
+['remote "workspace"']
+    url = s3://ws-bob/sen1floods11-dataset
+    endpointurl = https://minio.develop.eoepca.org
