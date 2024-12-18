@@ -14,9 +14,8 @@ import rasterio
 from dvc.api import DVCFileSystem
 from datasets import BuilderConfig
 
-S1 = "/v1.1/data/flood_events/HandLabeled/S1Hand/"
-LABELS = "/v1.1/data/flood_events/HandLabeled/LabelHand/"
-PREFIX = "sen1floods11-dataset"
+S1 = "v1.1/data/flood_events/HandLabeled/S1Hand/"
+LABELS = "v1.1/data/flood_events/HandLabeled/LabelHand/"
 
 
 class CustomBuilderConfig(BuilderConfig):
@@ -113,8 +112,8 @@ class Sen1floods11Dataset(datasets.GeneratorBasedBuilder):
         is in cache, load the input from the cache. Otherwise Download the input
         and save it in cache.
         """
-        local_path = PREFIX + input_path + image_name
-        dvc_path = input_path + image_name
+        local_path = os.path.join(self.config.context, input_path, image_name)
+        dvc_path = "/" + input_path + image_name
         if no_cache:
             binary_image = self.fs.read_bytes(dvc_path)
             image_stream = BytesIO(binary_image)
