@@ -29,11 +29,8 @@ class CustomBuilderConfig(BuilderConfig):
     def __init__(self, version="1.0.0", description=None, **kwargs):
         super().__init__(version=version, description=description)
         config = kwargs.get("config_kwargs")
-        if config:
-            self.no_cache = config["no_cache"]
-            self.context = config["context"]
-        else:
-            self.no_cache = False
+        self.no_cache = config["no_cache"]
+        self.context = config["context"]
 
 
 class Sen1floods11Dataset(datasets.GeneratorBasedBuilder):
