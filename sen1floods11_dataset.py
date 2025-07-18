@@ -1,5 +1,5 @@
 """
-This module will be used in load_dataset method from Datasets library from 
+This module will be used in load_dataset method from Datasets library from
 HuggingFace. The goal is to load the dataset Sen1floods11Dataset and stream the
 data.
 """
@@ -93,15 +93,15 @@ class Sen1floods11Dataset(datasets.GeneratorBasedBuilder):
         return [
             datasets.SplitGenerator(
                 name=datasets.Split.TRAIN,
-                gen_kwargs={"csv_file": f"{data_dir}/flood_train_data.csv"},
+                gen_kwargs={"csv_file": f"{data_dir}/train_data.csv"},
             ),
             datasets.SplitGenerator(
                 name=datasets.Split.VALIDATION,
-                gen_kwargs={"csv_file": f"{data_dir}/flood_valid_data.csv"},
+                gen_kwargs={"csv_file": f"{data_dir}/valid_data.csv"},
             ),
             datasets.SplitGenerator(
                 name=datasets.Split.TEST,
-                gen_kwargs={"csv_file": f"{data_dir}/flood_test_data.csv"},
+                gen_kwargs={"csv_file": f"{data_dir}/test_data.csv"},
             ),
         ]
 
