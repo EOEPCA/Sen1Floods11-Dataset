@@ -1,167 +1,122 @@
 """
-This module will be used in load_dataset method from Datasets library from
-HuggingFace. The goal is to load the dataset Sen1floods11Dataset and stream the
-data.
+This module declares a class generator that can be used with the `datasets`
+library from HuggingFace.
 """
 
-import os
+import csv
+import random
+from collections.abc import Callable, Generator, Iterator, Mapping
 from io import BytesIO
+from pathlib import Path
+from types import EllipsisType
+from typing import Any, Protocol, runtime_checkable
 
-import datasets.filesystems
-import datasets
 import numpy as np
 import rasterio
 from dvc.api import DVCFileSystem
-from datasets import BuilderConfig
-
-S1 = "v1.1/data/flood_events/HandLabeled/S1Hand/"
-LABELS = "v1.1/data/flood_events/HandLabeled/LabelHand/"
 
 
-class CustomBuilderConfig(BuilderConfig):
-    """
-    This class is used to transfer configurations variables (such as 'no_cache'
-    option and 'context' path) to the class Sen1floods11Dataset in self config
-    field.
-    """
-
-    def __init__(self, version="1.0.0", description=None, **kwargs):
-        super().__init__(version=version, description=description)
-        config = kwargs.get("config_kwargs")
-        self.no_cache = config["no_cache"]
-        self.context = config["context"]
+@runtime_checkable
+class DatasetGenerator(Protocol):
+    def __len__(self) -> int: ...
+    def __call__(self, *args: Any, **kwargs: Any) -> Generator[dict, None, None]: ...
 
 
-class Sen1floods11Dataset(datasets.GeneratorBasedBuilder):
-    """
-    A custom dataset class for loading and preprocessing the Sen1Floods11
-    dataset, designed for flood detection using Sentinel-1 satellite imagery.
+class DatasetLoader(Mapping):
+    SPLITS = {
+        "train": "train_data.csv",
+        "validation": "valid_data.csv",
+        "test": "test_data.csv",
+        "sample": "sample_data.csv",
+    }
 
-    This class uses the Hugging Face `datasets` library to handle data
-    generation and implements specific logic to load, process, and stream the
-    dataset efficiently.
-
-    Main Features:
-        - Custom Configuration: Uses a `CustomBuilderConfig` to handle optional
-    parameters like `no_cache`, which enables on-the-fly reading of data without
-    saving it to the local cache.
-        - File System Integration: Integrates with a DVCFileSystem to fetch data
-    dynamically (e.g., from DVC remote storage).
-        - Data Preprocessing: Applies transformations to both
-    images and masks:
-        - Images are clipped, normalized, and converted to a range [0, 1].
-        - Streaming capability: Supports streaming mode, which allows the
-        dataset to be loaded progressively, ideal for working with large
-    datasets that cannot fit into memory.
-
-    Dataset Split Information: - Train: Training split with associated images
-    and masks. - Validation: Validation split for hyperparameter tuning. - Test:
-    Test split for model evaluation.
-
-    Output Data: - Each example consists of:
-        - `image`: A preprocessed 3D array (512x512x2) representing the
-            Sentinel-1 imagery.
-        - `mask`: A preprocessed 3D array (512x512x1) representing the ground
-            truth flood masks.
-
-    Usage: - The class is compatible with the Hugging Face datasets library and
-    can be used for tasks like model training, validation, and testing in flood
-    detection pipelines.
-    """
-
-    BUILDER_CONFIG_CLASS = CustomBuilderConfig
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.fs = DVCFileSystem(self.config.context)
-
-    def _info(self):
-        """Contains informations and typings for the dataset."""
-
-        return datasets.DatasetInfo(
-            description="Sen1Floods11 - Dataset for flood detection using Sentinel-1 data.",
-            features=datasets.Features(
-                {
-                    "image": datasets.Array3D(shape=(512, 512, 2), dtype="float32"),
-                    "mask": datasets.Array3D(shape=(512, 512, 1), dtype="int32"),
-                }
-            ),
+    def __init__(self, context: str | EllipsisType = ..., /) -> None:
+        self.context = (
+            Path(__file__).resolve().parent
+            if context is Ellipsis
+            else Path(context).resolve()
         )
 
-    def _split_generators(self, dl_manager):
-        data_dir = "sen1floods11-dataset"
-        return [
-            datasets.SplitGenerator(
-                name=datasets.Split.TRAIN,
-                gen_kwargs={"csv_file": f"{data_dir}/train_data.csv"},
-            ),
-            datasets.SplitGenerator(
-                name=datasets.Split.VALIDATION,
-                gen_kwargs={"csv_file": f"{data_dir}/valid_data.csv"},
-            ),
-            datasets.SplitGenerator(
-                name=datasets.Split.TEST,
-                gen_kwargs={"csv_file": f"{data_dir}/test_data.csv"},
-            ),
-        ]
+    def __len__(self) -> int:
+        return len(self.SPLITS)
 
-    def load_input(self, input_path, image_name, no_cache):
-        """
-        If --no-cache option is enabled, just read input on the fly (input is
-        downloaded but not saved). If --no-cache option is disabled and theinput
-        is in cache, load the input from the cache. Otherwise Download the input
-        and save it in cache.
-        """
-        local_path = os.path.join(self.config.context, input_path, image_name)
-        dvc_path = "/" + input_path + image_name
-        if no_cache:
-            binary_image = self.fs.read_bytes(dvc_path)
-            image_stream = BytesIO(binary_image)
-            with rasterio.open(image_stream) as src:
-                image = src.read()
-        elif not os.path.isfile(local_path) and not no_cache:
-            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.SPLITS)
 
-            binary_image = self.fs.read_bytes(dvc_path)
-            image_stream = BytesIO(binary_image)
+    def __getitem__(self, key: str) -> DatasetGenerator:
+        return FloodDatasetGenerator(
+            context=self.context, split=self.SPLITS.get(key, key)
+        )
 
-            with rasterio.open(image_stream) as src:
-                profile = src.profile
-                image = src.read()
-                with rasterio.open(local_path, "w", **profile) as dst:
-                    dst.write(image)
-        else:
+
+class FloodDatasetGenerator(DatasetGenerator):
+    S1 = "v1.1/data/flood_events/HandLabeled/S1Hand/"
+    LABELS = "v1.1/data/flood_events/HandLabeled/LabelHand/"
+
+    def __init__(
+        self,
+        context: Path,
+        split: str,
+    ) -> None:
+        self.context = context
+        self.split = split
+        self._dvc_fs = DVCFileSystem(repo=self.context)
+
+    def __len__(self) -> int:
+        csv_file_path = self.context / self.split
+        with csv_file_path.open() as f:
+            csv_reader = csv.reader(f, delimiter=",")
+            return len(tuple(csv_reader))
+
+    def __call__(
+        self,
+        shuffle: bool = False,
+        stream: bool = False,
+        stream_cache: bool = True,
+        process_func: Callable[[dict], dict] | None = None,
+        **kwargs,
+    ) -> Generator[dict, None, None]:
+        csv_file_path = self.context / self.split
+        with csv_file_path.open() as f:
+            csv_reader = csv.reader(f, delimiter=",")
+            rows = [*csv_reader]
+
+            if shuffle:
+                random.shuffle(rows)
+
+            for row in rows:
+                data = {
+                    "image": self._load_image(
+                        self.S1, row[0], stream=stream, stream_cache=stream_cache
+                    ),
+                    "mask": self._load_image(
+                        self.LABELS, row[1], stream=stream, stream_cache=stream_cache
+                    ),
+                }
+                if process_func:
+                    data = process_func(data)
+                yield data
+
+    def _load_image(
+        self,
+        image_dir: str,
+        image_name: str,
+        stream: bool = False,
+        stream_cache: bool = True,
+    ) -> np.ndarray:
+        local_path = self.context / image_dir / image_name
+        if local_path.is_file():
             with rasterio.open(local_path) as src:
                 image = src.read()
+        elif stream:
+            dvc_path = Path("/", image_dir, image_name)
+            binary_image = self._dvc_fs.read_bytes(dvc_path)
+            image_stream = BytesIO(binary_image)
+            with rasterio.open(image_stream) as src:
+                image = src.read()
+                if stream_cache:
+                    local_path.parent.mkdir(parents=True, exist_ok=True)
+                    local_path.write_bytes(data=image_stream.getbuffer())
+        else:
+            raise RuntimeError(f"File not accessible: {local_path}")
         return image
-
-    def process_image(self, image):
-        """Process the image that will be the model input."""
-        image = np.nan_to_num(image)
-        image = np.clip(image, -50, 1)
-        image = (image + 50) / 51
-        return image
-
-    def process_mask(self, mask):
-        """Process the mask that will be compared to the model output."""
-        mask[mask == -1] = 255
-        return mask
-
-    def _generate_examples(self, **kwargs):
-        """When iterating the dataset, yield image & mask."""
-        csv_file = kwargs.get("csv_file")
-        no_cache = self.config.no_cache
-        with open(csv_file, "r", encoding="utf-8") as f:
-            for idx, line in enumerate(f):
-                image_name, mask_name = line.strip().split(",")
-
-                image = self.load_input(S1, image_name, no_cache)
-                image = self.process_image(image)
-
-                mask = self.load_input(LABELS, mask_name, no_cache)
-                mask = self.process_mask(mask)
-
-                yield idx, {
-                    "image": image,
-                    "mask": mask,
-                }
