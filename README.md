@@ -29,45 +29,15 @@ dvc remote modify --local workspace access_key_id 'mysecret'
 dvc remote modify --local workspace secret_access_key 'mysecret'
 ```
 
-#### Tracking data
-
-Working inside an initialized project directory, let's pick a piece of data to work with. We'll use an example `very_big_file.txt` file, in the `data` directory.
-
-```bash
-echo "very big content" > data/very_big_file.txt
-```
-
-Use `dvc add` to start tracking the dataset file:
-
-```bash
-dvc add data/very_big_file.txt
-```
-
-DVC stores information about the added file in a special `.dvc` file named `data/very_big_file.txt.dvc`. This small, human-readable metadata file acts as a placeholder for the original data for the purpose of Git tracking.
-
-Next, run the following commands to track changes in Git:
-
-```bash
-git add data
-git commit -m "chore: add raw data"
-dvc push
-git git push --set-upstream origin main
-```
-
 ### Load the Dataset with Hugging Face datasets library
 
 ```python
-from datasets import load_dataset
+import datasets
+from dataset import DatasetLoader
 
-train_data = load_dataset(
-                "sen1floods11-dataset/sen1floods11_dataset.py",
-                split="train",
-                streaming=True,
-                trust_remote_code=True,
-                config_kwargs={
-                    "no_cache": no_cache,
-                    "context": "sen1floods11-dataset/",
-                },
-            )
-print(next(iter(train_data)))
+dl = DatasetLoader(".")
+
+train_data = datasets.IterableDataset.from_generator(
+    dl["train"], gen_kwargs={"shuffle": True}
+)
 ```
